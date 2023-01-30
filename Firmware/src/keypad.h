@@ -1,12 +1,6 @@
-#ifndef keypad.h
-#define keypad.h
-
-
-
-/**
- * @brief // Return which key is pressed on the keypad
-*/
+#ifndef keypad
+#define keypad
 
 int keypadRead(); 
 
-#endif keypad.h
+#endif
