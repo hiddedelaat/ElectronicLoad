@@ -22,8 +22,10 @@ unsigned long prevMicros;
 
 const int fanPin = 13;
 const int fanChannel = 1;
-const double fanPwmFrequency = 10;
+const double fanPwmFrequency = 30;
 const int fanPwmResolution = 8;
+
+float fanSpeed = 0;
 
 const int buzPin = 4;
 const int buzChannel = 8;
@@ -32,8 +34,8 @@ bool      outputOn = 0;
 bool      senseFlag = 0;
 
 /* Telemetry Variables*/
-uint16_t voltageAdcRaw = 0;
-uint16_t currentAdcRaw = 0; 
+int16_t voltageAdcRaw = 0;
+int16_t currentAdcRaw = 0; 
 
 /* Calibration constants */
 const float voltage_cal = 99.58;
@@ -57,23 +59,13 @@ int dacv = 0;
 float Iset = 10.0;
 float tempC = 0;
 
-float fanSet(float P, float T) {
+float fanSet(float Power, float Temp) {
 
-  float fanSpeed = 0.0;
+  fanSpeed = 0.0;
 
-  if ((P >= 25.0 && P < 50.0) | (T >= 35.0 && P < 45.0)) {
-    fanSpeed = 25.0;
-    //leds[0] = CRGB::Green;
-  }
-
-  if ((P >= 50.0 && P < 100.0) | (T >= 45.0 && P < 55.0)) {
-    fanSpeed = 60.0;
-    //leds[0] = CRGB::Yellow;
-  }
-
-  if (P >= 100.0 || T >= 50.0) {
+  fanSpeed = 0.0042*(pow(Temp, 2.4)); // Fan Curve (Excel File)
+  if (fanSpeed > 100.0){
     fanSpeed = 100.0;
-    //leds[0] = CRGB::Red;
   }
 
   ledcWrite(fanChannel, (fanSpeed / 100.0) * 255);
@@ -269,13 +261,13 @@ void loop() {
   Serial.print("I_SET:");
   Serial.print(I_set, 4);
   Serial.print("A | I_ADC_RAW:");
-  Serial.print(currentAdcRaw_t);
+  Serial.print(currentAdcRaw);
   Serial.print(" | V_ADC_RAW:");
-  Serial.print(voltageAdcRaw_t);
+  Serial.print(voltageAdcRaw);
   Serial.print(" | I_MEAS:");
-  Serial.print(I_meas);
+  Serial.print(I_meas, 4);
   Serial.print("A | V_MEAS:");
-  Serial.print(V_meas);
+  Serial.print(V_meas, 4);
   Serial.print("V | P_SET:");
   Serial.print(P_set, 3);
   Serial.print("W | P_MEAS:");
