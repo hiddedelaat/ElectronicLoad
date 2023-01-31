@@ -47,9 +47,10 @@ const int buzChannel = 8;
 /* Flags */
 bool outputOn = 0;
 bool senseFlag = 0;
-bool cursorFlag = 0;
 
 /* Telemetry Variables*/
+int dacCounts = 0;
+
 int16_t voltageAdcRaw = 0;
 int16_t currentAdcRaw = 0;
 float currentAdcRaw_t = 0;
@@ -57,17 +58,17 @@ float voltageAdcRaw_t = 0;
 
 float I_meas = 0;
 float V_meas = 0;
-float P_set = 0;
 float P_meas = 0;
-float dacv_f = 0;
+
+float dacCounts_f = 0;
+float I_set = 0;
 
 /* Calibration constants */
 const float voltage_cal = 99.58;
 
 int keypress = 0;
 int keypress_t = 0;
-int dacv = 0;
-float Iset = 10.0;
+float IMax = 10.0;
 float tempC = 0;
 
 float fanSet(float Temp) {
@@ -163,26 +164,26 @@ void loop() {
   if (keypress > 0) {
     switch (keypress) {
       case 1:
-        if (dacv + 10 <= 4095) {
-          dacv = dacv + 10;
+        if (I_set + 0.1 <= IMax) {
+          I_set = I_set + 0.1;
         }
-        else if (dacv + 10 > 4095) {
-          dacv = 4095;
+        else if (I_set > 10.0) {
+          I_set = IMax;
         }
         break;
       case 2:
-        if (dacv - 10 >= 0) {
-          dacv = dacv - 10;
+        if (I_set - 0.1 >= 0) {
+          I_set = I_set - 0.1;
         }
-        else if (dacv - 10 < 0) {
-          dacv = 0;
+        else if (I_set - 0.1 < 0) {
+          I_set = 0.0;
         }
         break;
       case 3:
-        dacv = 0;
+        I_set = 0.0;
         break;
       case 5:
-        dacv = 4095;
+        I_set = 10.0;
         break;
       case 9:
         lcd.clear();
@@ -194,9 +195,9 @@ void loop() {
     }
   }
 
-  float dacv_f = float(dacv);
-  float I_set = (Iset / 4095.0) * dacv_f;
-
+  dacCounts_f = float(dacCounts);
+  // I_set = (IMax / 4095.0) * dacCounts_f;
+  dacCounts = (I_set / IMax) * 4095;
   currentAdcRaw = ads.readADC_SingleEnded(3); // Current ADC 16 bit
 
   /* Differential Voltage Measurement is work in progress! */
@@ -219,10 +220,9 @@ void loop() {
   currentAdcRaw_t = float(currentAdcRaw);
   voltageAdcRaw_t = float(voltageAdcRaw);
 
-  I_meas = (Iset / (32768 - 1)) * currentAdcRaw_t;
+  I_meas = (IMax / (32768 - 1)) * currentAdcRaw_t;
   V_meas = (80.0 / (32768 - 1)) * voltageAdcRaw_t;
   V_meas = (V_meas * voltage_cal) / 100;
-  P_set  = I_set * V_meas;
   P_meas = I_meas * V_meas;
 
   sensors.requestTemperatures();
@@ -239,17 +239,12 @@ void loop() {
     digitalWrite(loadButtonLed, LOW);
   }
   else{
-    dac.setVoltage(dacv, false);
+    dac.setVoltage(dacCounts, false);
     digitalWrite(loadButtonLed, HIGH);
   }
 
-  if (cursorFlag != false){
-  lcd.noCursor();
-  cursorFlag = false;
-  }
-
   lcd.setCursor(0, 0);
-  lcd.print("Iset: ");
+  lcd.print("IMax: ");
   lcd.print(I_set, 2);
   lcd.print("A ");
   lcd.print(currentAdcRaw);
@@ -278,12 +273,6 @@ void loop() {
   lcd.print("%");
   lcd.setCursor(11, 3);
 
-  lcd.setCursor(6, 0);
-  if (cursorFlag != true){
-  lcd.cursor();
-  cursorFlag = true;
-  }
-
   // lcd.setCursor(17, 3);
   // if(senseFlag == 0){
   //   lcd.print("Off");
@@ -302,9 +291,7 @@ void loop() {
   Serial.print(I_meas, 4);
   Serial.print("A | V_MEAS:");
   Serial.print(V_meas, 4);
-  Serial.print("V | P_SET:");
-  Serial.print(P_set, 3);
-  Serial.print("W | P_MEAS:");
+  Serial.print("V | P_MEAS: ");
   Serial.print(P_meas, 3);
   Serial.print("W | ");
   Serial.print(fanSpeed, 0);
