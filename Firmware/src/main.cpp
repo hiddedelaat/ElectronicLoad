@@ -6,6 +6,19 @@
 #include <DallasTemperature.h>
 
 #include "keypad.h"
+#include "rotaryEncoder.h"
+#define R1 32
+#define R2 33
+#define R3 25
+#define R4 26
+#define C1 27
+#define C2 14
+#define C3 12
+#define C4 16
+
+#define relayPin 17
+#define loadButtonPin 5
+#define loadButtonLed 18
 
 OneWire oneWire(15);
 DallasTemperature sensors(&oneWire);
@@ -16,42 +29,40 @@ Adafruit_MCP4725 dac;
 Adafruit_ADS1115 ads;
 
 /* Debug */
-int debug = 0;
+const int debug = 0;
 unsigned long prevMillis;
 unsigned long prevMicros;
 
+/* Fan Config */
 const int fanPin = 13;
 const int fanChannel = 1;
 const double fanPwmFrequency = 30;
 const int fanPwmResolution = 8;
-
 float fanSpeed = 0;
 
+/* Buzzer config */
 const int buzPin = 4;
 const int buzChannel = 8;
 
-bool      outputOn = 0;
-bool      senseFlag = 0;
+/* Flags */
+bool outputOn = 0;
+bool senseFlag = 0;
+bool cursorFlag = 0;
 
 /* Telemetry Variables*/
 int16_t voltageAdcRaw = 0;
-int16_t currentAdcRaw = 0; 
+int16_t currentAdcRaw = 0;
+float currentAdcRaw_t = 0;
+float voltageAdcRaw_t = 0;
+
+float I_meas = 0;
+float V_meas = 0;
+float P_set = 0;
+float P_meas = 0;
+float dacv_f = 0;
 
 /* Calibration constants */
 const float voltage_cal = 99.58;
-
-#define R1 32
-#define R2 33
-#define R3 25
-#define R4 26
-#define C1 27
-#define C2 14
-#define C3 12
-#define C4 16
-
-#define relay 17
-#define load_sw 5
-#define load_sw_led 18
 
 int keypress = 0;
 int keypress_t = 0;
@@ -59,13 +70,16 @@ int dacv = 0;
 float Iset = 10.0;
 float tempC = 0;
 
-float fanSet(float Power, float Temp) {
+float fanSet(float Temp) {
 
   fanSpeed = 0.0;
 
   fanSpeed = 0.0042*(pow(Temp, 2.4)); // Fan Curve (Excel File)
   if (fanSpeed > 100.0){
     fanSpeed = 100.0;
+  }
+  if (fanSpeed < 20.0){
+    fanSpeed = 0.0;
   }
 
   ledcWrite(fanChannel, (fanSpeed / 100.0) * 255);
@@ -86,6 +100,7 @@ void printAddress(DeviceAddress deviceAddress)
 float printTemperature(DeviceAddress deviceAddress)
 {
   float tempC = sensors.getTempC(deviceAddress);
+
   if (tempC == DEVICE_DISCONNECTED_C)
   {
     Serial.println("Error: Could not read temperature data");
@@ -104,10 +119,9 @@ void setup() {
   pinMode(R3, INPUT_PULLUP);
   pinMode(R4, INPUT_PULLUP);
 
-  pinMode(relay, OUTPUT);
-  pinMode(load_sw, INPUT_PULLUP);
-  pinMode(load_sw_led, OUTPUT);
-
+  pinMode(relayPin, OUTPUT);
+  pinMode(loadButtonPin, INPUT_PULLUP);
+  pinMode(loadButtonLed, OUTPUT);
 
   digitalWrite(C1, LOW);
   digitalWrite(C2, LOW);
@@ -133,6 +147,8 @@ void setup() {
   ledcWrite(buzChannel,0);
 
   sensors.begin();
+
+  encoderInit();
 
   if (!sensors.getAddress(insideThermometer, 0)) Serial.println("Unable to find address for Device 0");
 
@@ -172,12 +188,8 @@ void loop() {
         lcd.clear();
         break;
       case 10:
-        digitalWrite(relay, LOW);
-        senseFlag = false;
         break;
       case 11:
-        digitalWrite(relay, HIGH);
-        senseFlag = true;
         break;
     }
   }
@@ -187,46 +199,53 @@ void loop() {
 
   currentAdcRaw = ads.readADC_SingleEnded(3); // Current ADC 16 bit
 
+  /* Differential Voltage Measurement is work in progress! */
+
   if (senseFlag == true){
   voltageAdcRaw = ads.readADC_Differential_0_1();
+  voltageAdcRaw = (voltageAdcRaw + 4462) * 2.1378;
   }
   else{
   voltageAdcRaw = ads.readADC_SingleEnded(0);
-  }
-
-  if (voltageAdcRaw < 0) {
-    voltageAdcRaw = 0;
+    if (voltageAdcRaw < 0) {
+      voltageAdcRaw = 0;
+    }
   }
 
   if (currentAdcRaw < 0) {
     currentAdcRaw = 0;
   }
 
-  float currentAdcRaw_t = float(currentAdcRaw);
-  float voltageAdcRaw_t = float(voltageAdcRaw);
+  currentAdcRaw_t = float(currentAdcRaw);
+  voltageAdcRaw_t = float(voltageAdcRaw);
 
-  float I_meas = (Iset / (32768 - 1)) * currentAdcRaw_t;
-  float V_meas = (80.0 / (32768 - 1)) * voltageAdcRaw_t;
-        V_meas = (V_meas * voltage_cal) / 100;
-  float P_set  = I_set * V_meas;
-  float P_meas = I_meas * V_meas;
+  I_meas = (Iset / (32768 - 1)) * currentAdcRaw_t;
+  V_meas = (80.0 / (32768 - 1)) * voltageAdcRaw_t;
+  V_meas = (V_meas * voltage_cal) / 100;
+  P_set  = I_set * V_meas;
+  P_meas = I_meas * V_meas;
 
   sensors.requestTemperatures();
   tempC = printTemperature(insideThermometer);
 
-  float F_speed = fanSet(P_meas, tempC);
+  fanSpeed = fanSet(tempC);
 
-  if ((digitalRead(load_sw)) == 0){
+  if ((digitalRead(loadButtonPin)) == 0){
     outputOn = !outputOn;
   }
 
   if (outputOn == 0){
     dac.setVoltage(0, false);
-    digitalWrite(load_sw_led, LOW);
+    digitalWrite(loadButtonLed, LOW);
   }
   else{
     dac.setVoltage(dacv, false);
-    digitalWrite(load_sw_led, HIGH);
+    digitalWrite(loadButtonLed, HIGH);
+  }
+
+  if (cursorFlag != false){
+  lcd.noCursor();
+  cursorFlag = false;
   }
 
   lcd.setCursor(0, 0);
@@ -246,17 +265,32 @@ void loop() {
   lcd.setCursor(0, 2);
   lcd.print("P: ");
   lcd.print(P_meas, 2);
-  lcd.setCursor(15, 2);
-  lcd.print(tempC, 1);
+  lcd.setCursor(17, 2);
+  lcd.print(tempC, 0);
   lcd.setCursor(19, 2);
   lcd.print("c");
   lcd.setCursor(8, 2);
   lcd.print("W");
   lcd.setCursor(0, 3);
   lcd.print("FAN: ");
-  lcd.print(F_speed, 1);
-  lcd.setCursor(10, 3);
+  lcd.print(fanSpeed, 0);
+  lcd.setCursor(8, 3);
   lcd.print("%");
+  lcd.setCursor(11, 3);
+
+  lcd.setCursor(6, 0);
+  if (cursorFlag != true){
+  lcd.cursor();
+  cursorFlag = true;
+  }
+
+  // lcd.setCursor(17, 3);
+  // if(senseFlag == 0){
+  //   lcd.print("Off");
+  // }
+  // else{
+  //   lcd.print("On");
+  // }
 
   Serial.print("I_SET:");
   Serial.print(I_set, 4);
@@ -273,15 +307,16 @@ void loop() {
   Serial.print("W | P_MEAS:");
   Serial.print(P_meas, 3);
   Serial.print("W | ");
-  Serial.print(F_speed, 2);
+  Serial.print(fanSpeed, 0);
   Serial.print("% | ");
   Serial.print("sinkTemp:");
   Serial.print(tempC, 2);  
-  Serial.print("°C | loopTime (ms): ");
+  Serial.print("°C | loopTime: ");
   Serial.print(millis() - prevMillis);
-  Serial.print("ms | loopTime (µs):  ");  
+  Serial.print("ms | ");  
   Serial.print(micros() - prevMicros);
-  Serial.println("µs"); 
+  Serial.println("µs");
+  
 
 }
 
