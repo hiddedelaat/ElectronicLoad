@@ -12,13 +12,15 @@ void encoderInit(){
 
 }
 
-int64_t detectMovement(){
+int detectMovement(){
   int64_t count = encoder.getCount();
-  if (count >= 2){ // CC turn
-    return 2;
+  if (count >= 2){ // CW turn
+    encoder.clearCount();
+    return 1;
   }
   if (count <= -2){ // CCW Turn
-    return 1;
+    encoder.clearCount();
+    return 2;
   }
   return 0;
 }

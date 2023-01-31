@@ -7,6 +7,7 @@
 
 #include "keypad.h"
 #include "rotaryEncoder.h"
+
 #define R1 32
 #define R2 33
 #define R3 25
@@ -33,6 +34,8 @@ const int debug = 0;
 unsigned long prevMillis;
 unsigned long prevMicros;
 
+int adjcounter = 0;
+
 /* Fan Config */
 const int fanPin = 13;
 const int fanChannel = 1;
@@ -49,54 +52,46 @@ bool outputOn = 0;
 bool senseFlag = 0;
 
 /* Telemetry Variables*/
-int dacCounts = 0;
 
+// ADC Readings
 int16_t voltageAdcRaw = 0;
 int16_t currentAdcRaw = 0;
-float currentAdcRaw_t = 0;
-float voltageAdcRaw_t = 0;
+float   currentAdcRaw_f = 0;
+float   voltageAdcRaw_f = 0;
 
-float I_meas = 0;
-float V_meas = 0;
-float P_meas = 0;
+// Calculated telemetry from ADC
+float measuredCurrent = 0;
+float measuredVoltage = 0;
+float measuredPower = 0;
 
-float dacCounts_f = 0;
-float I_set = 0;
+// DAC & current set values
+int   dacCounts = 0;
+float setCurrent = 0;
+float setCurrentPrevious = 0;
 
 /* Calibration constants */
 const float voltage_cal = 99.58;
 
 int keypress = 0;
 int keypress_t = 0;
-float IMax = 10.0;
+const float hardwareMaxCurrent = 10.0;
 float tempC = 0;
 
 float fanSet(float Temp) {
 
-  fanSpeed = 0.0;
+  fanSpeed = 0.0042*(pow(Temp, 2.4)); // Fan Curve formula (0.0042*temp^2.4)
 
-  fanSpeed = 0.0042*(pow(Temp, 2.4)); // Fan Curve (Excel File)
-  if (fanSpeed > 100.0){
-    fanSpeed = 100.0;
-  }
-  if (fanSpeed < 20.0){
-    fanSpeed = 0.0;
-  }
+    if (fanSpeed > 100.0){
+      fanSpeed = 100.0;
+    }
+    if (fanSpeed < 20.0){
+      fanSpeed = 0.0;
+    }
 
   ledcWrite(fanChannel, (fanSpeed / 100.0) * 255);
-
   return fanSpeed;
+}
 
-}
-// function to print a device address
-void printAddress(DeviceAddress deviceAddress)
-{
-  for (uint8_t i = 0; i < 8; i++)
-  {
-    if (deviceAddress[i] < 16) Serial.print("0");
-    Serial.print(deviceAddress[i], HEX);
-  }
-}
 // function to print the temperature for a device
 float printTemperature(DeviceAddress deviceAddress)
 {
@@ -131,7 +126,7 @@ void setup() {
   Serial.begin(115200);
 
   dac.begin(0x60);
-  dac.setVoltage(0x000, true);
+  // dac.setVoltage(0, true);
 
   ledcSetup(fanChannel, fanPwmFrequency, fanPwmResolution);
   ledcAttachPin(fanPin, fanChannel);
@@ -143,7 +138,7 @@ void setup() {
   lcd.init();
   lcd.backlight();
 
-  ledcWriteNote(buzChannel, NOTE_D, 6);
+  ledcWriteNote(buzChannel, NOTE_C, 6);
   delay(250);
   ledcWrite(buzChannel,0);
 
@@ -164,26 +159,30 @@ void loop() {
   if (keypress > 0) {
     switch (keypress) {
       case 1:
-        if (I_set + 0.1 <= IMax) {
-          I_set = I_set + 0.1;
+        if (setCurrent + 0.1 <= hardwareMaxCurrent) {
+          setCurrent = setCurrent + 0.1;
         }
-        else if (I_set > 10.0) {
-          I_set = IMax;
+        else if (setCurrent > 10.0) {
+          setCurrent = hardwareMaxCurrent;
         }
+        lcd.clear();
         break;
       case 2:
-        if (I_set - 0.1 >= 0) {
-          I_set = I_set - 0.1;
+        if (setCurrent - 0.1 >= 0) {
+          setCurrent = setCurrent - 0.1;
         }
-        else if (I_set - 0.1 < 0) {
-          I_set = 0.0;
+        else if (setCurrent - 0.1 < 0) {
+          setCurrent = 0.0;
         }
+        lcd.clear();
         break;
       case 3:
-        I_set = 0.0;
+        setCurrent = 0.0;
+        lcd.clear();
         break;
       case 5:
-        I_set = 10.0;
+        setCurrent = 10.0;
+        lcd.clear();
         break;
       case 9:
         lcd.clear();
@@ -195,35 +194,29 @@ void loop() {
     }
   }
 
-  dacCounts_f = float(dacCounts);
-  // I_set = (IMax / 4095.0) * dacCounts_f;
-  dacCounts = (I_set / IMax) * 4095;
-  currentAdcRaw = ads.readADC_SingleEnded(3); // Current ADC 16 bit
-
-  /* Differential Voltage Measurement is work in progress! */
-
-  if (senseFlag == true){
-  voltageAdcRaw = ads.readADC_Differential_0_1();
-  voltageAdcRaw = (voltageAdcRaw + 4462) * 2.1378;
+  if (setCurrent != setCurrentPrevious){
+  dacCounts = (setCurrent / hardwareMaxCurrent) * 4095;
+  setCurrentPrevious = setCurrent;
+  adjcounter++;
+  
   }
-  else{
+
+  Serial.println(adjcounter);
+
+  currentAdcRaw = ads.readADC_SingleEnded(3);
   voltageAdcRaw = ads.readADC_SingleEnded(0);
-    if (voltageAdcRaw < 0) {
-      voltageAdcRaw = 0;
-    }
-  }
 
   if (currentAdcRaw < 0) {
     currentAdcRaw = 0;
   }
 
-  currentAdcRaw_t = float(currentAdcRaw);
-  voltageAdcRaw_t = float(voltageAdcRaw);
+  currentAdcRaw_f = float(currentAdcRaw);
+  voltageAdcRaw_f = float(voltageAdcRaw);
 
-  I_meas = (IMax / (32768 - 1)) * currentAdcRaw_t;
-  V_meas = (80.0 / (32768 - 1)) * voltageAdcRaw_t;
-  V_meas = (V_meas * voltage_cal) / 100;
-  P_meas = I_meas * V_meas;
+  measuredCurrent = (hardwareMaxCurrent / (32768 - 1)) * currentAdcRaw_f;
+  measuredVoltage = (80.0 / (32768 - 1)) * voltageAdcRaw_f;
+  measuredVoltage = (measuredVoltage * voltage_cal) / 100;
+  measuredPower = measuredCurrent * measuredVoltage;
 
   sensors.requestTemperatures();
   tempC = printTemperature(insideThermometer);
@@ -244,66 +237,78 @@ void loop() {
   }
 
   lcd.setCursor(0, 0);
-  lcd.print("IMax: ");
-  lcd.print(I_set, 2);
-  lcd.print("A ");
-  lcd.print(currentAdcRaw);
-  lcd.setCursor(0, 1);
-  lcd.print("I: ");
-  lcd.print(I_meas, 2);
-  lcd.setCursor(7, 1);
+  lcd.print("Iset:");
+  lcd.print(setCurrent, 2);
   lcd.print("A");
-  lcd.setCursor(11, 1);
-  lcd.print("V: ");
-  lcd.print(V_meas, 2);
+  lcd.setCursor(0, 1);
+  lcd.print("I:");
+  lcd.print(measuredCurrent, 2);
+  lcd.print("A");
+  lcd.setCursor(12, 0);
+  lcd.print("V:");
+  lcd.print(measuredVoltage, 2);
   lcd.print("V");
   lcd.setCursor(0, 2);
-  lcd.print("P: ");
-  lcd.print(P_meas, 2);
-  lcd.setCursor(17, 2);
-  lcd.print(tempC, 0);
-  lcd.setCursor(19, 2);
-  lcd.print("c");
-  lcd.setCursor(8, 2);
+  lcd.print("P:");
+  lcd.print(measuredPower, 2);
   lcd.print("W");
+  lcd.setCursor(17, 3);
+  lcd.print(tempC, 0);
+  lcd.print("C");
   lcd.setCursor(0, 3);
-  lcd.print("FAN: ");
+  lcd.print("FAN:");
   lcd.print(fanSpeed, 0);
-  lcd.setCursor(8, 3);
   lcd.print("%");
-  lcd.setCursor(11, 3);
 
-  // lcd.setCursor(17, 3);
-  // if(senseFlag == 0){
-  //   lcd.print("Off");
-  // }
-  // else{
-  //   lcd.print("On");
-  // }
 
-  Serial.print("I_SET:");
-  Serial.print(I_set, 4);
-  Serial.print("A | I_ADC_RAW:");
-  Serial.print(currentAdcRaw);
-  Serial.print(" | V_ADC_RAW:");
-  Serial.print(voltageAdcRaw);
-  Serial.print(" | I_MEAS:");
-  Serial.print(I_meas, 4);
-  Serial.print("A | V_MEAS:");
-  Serial.print(V_meas, 4);
-  Serial.print("V | P_MEAS: ");
-  Serial.print(P_meas, 3);
-  Serial.print("W | ");
-  Serial.print(fanSpeed, 0);
-  Serial.print("% | ");
-  Serial.print("sinkTemp:");
-  Serial.print(tempC, 2);  
-  Serial.print("°C | loopTime: ");
-  Serial.print(millis() - prevMillis);
-  Serial.print("ms | ");  
-  Serial.print(micros() - prevMicros);
-  Serial.println("µs");
-  
+  // Serial.print("setCurrent:");
+  // Serial.print(setCurrent, 4);
+  // Serial.print("A | I_ADC_RAW:");
+  // Serial.print(currentAdcRaw);
+  // Serial.print(" | V_ADC_RAW:");
+  // Serial.print(voltageAdcRaw);
+  // Serial.print(" | measuredCurrent:");
+  // Serial.print(measuredCurrent, 4);
+  // Serial.print("A | measuredVoltage:");
+  // Serial.print(measuredVoltage, 4);
+  // Serial.print("V | measuredPower: ");
+  // Serial.print(measuredPower, 3);
+  // Serial.print("W | ");
+  // Serial.print(fanSpeed, 0);
+  // Serial.print("% | ");
+  // Serial.print("sinkTemp:");
+  // Serial.print(tempC, 2);  
+  // Serial.print("°C | loopTime: ");
+  // Serial.print(millis() - prevMillis);
+  // Serial.print("ms | ");  
+  // Serial.print(micros() - prevMicros);
+  // Serial.println("µs");
+
+
+  int encoder = detectMovement();
+
+ if (encoder > 0) {
+    switch (encoder) {
+      case 1:
+        if (setCurrent + 0.1 <= hardwareMaxCurrent) {
+          setCurrent = setCurrent + 0.1;
+        }
+        else if (setCurrent + 0.1 > 10.0) {
+          setCurrent = hardwareMaxCurrent;
+        }
+      break;
+      case 2:
+        if (setCurrent - 0.1 >= 0) {
+          setCurrent = setCurrent - 0.1;
+        }
+        else if (setCurrent - 0.1 < 0) {
+          setCurrent = 0.0;
+        }
+      break;
+    }
+  }
+
 
 }
+
 
