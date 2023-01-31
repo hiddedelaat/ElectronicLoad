@@ -37,9 +37,9 @@ unsigned long prevMicros;
 /* Fan Config */
 const int fanPin = 13;
 const int fanChannel = 1;
-const double fanPwmFrequency = 30;
+const double fanPwmFrequency = 10;
 const int fanPwmResolution = 8;
-float fanSpeed = 0;
+int fanSpeed = 0;
 
 /* Buzzer config */
 const int buzPin = 4;
@@ -79,11 +79,11 @@ float fanSet(float Temp) {
 
   fanSpeed = 0.0042*(pow(Temp, 2.4)); // Fan Curve formula (0.0042*temp^2.4)
 
-    if (fanSpeed > 100.0){
-      fanSpeed = 100.0;
+    if (fanSpeed > 100){
+      fanSpeed = 100;
     }
-    if (fanSpeed < 20.0){
-      fanSpeed = 0.0;
+    if (fanSpeed < 20){
+      fanSpeed = 0;
     }
 
   ledcWrite(fanChannel, (fanSpeed / 100.0) * 255);
@@ -134,11 +134,19 @@ void setup() {
   ads.begin();
 
   lcd.init();
-  lcd.backlight();
-
-  ledcWriteNote(buzChannel, NOTE_C, 6);
-  delay(250);
+  
+  
+  
+  ledcWriteNote(buzChannel, NOTE_C, 5); delay(150);
+  ledcWriteNote(buzChannel, NOTE_E, 5); delay(150);
+  ledcWriteNote(buzChannel, NOTE_C, 6); delay(300);
   ledcWrite(buzChannel,0);
+  
+  fanSet(100.0);    // Give fake temperature to test fan
+  delay(2000);
+
+  
+  lcd.backlight();
 
   sensors.begin();
 
