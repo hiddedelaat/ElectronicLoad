@@ -34,8 +34,6 @@ const int debug = 0;
 unsigned long prevMillis;
 unsigned long prevMicros;
 
-int adjcounter = 0;
-
 /* Fan Config */
 const int fanPin = 13;
 const int fanChannel = 1;
@@ -156,6 +154,7 @@ void loop() {
   prevMicros = micros();
   keypress = keypadRead();
 
+  /* Decision switch case for keypress */
   if (keypress > 0) {
     switch (keypress) {
       case 1:
@@ -194,14 +193,24 @@ void loop() {
     }
   }
 
+  /* Determine dacCounts for set current if setCurrent has changed */
   if (setCurrent != setCurrentPrevious){
   dacCounts = (setCurrent / hardwareMaxCurrent) * 4095;
   setCurrentPrevious = setCurrent;
-  adjcounter++;
-  
   }
 
-  Serial.println(adjcounter);
+  /* Offset correction for current */
+  if (outputOn != 0 && measuredVoltage > 0.1){
+    if ((measuredCurrent - setCurrent) > 0.01){
+      dacCounts--;
+    }
+    else if ((measuredCurrent - setCurrent) < 0.01){
+      dacCounts++;
+    }
+  }
+  
+
+  Serial.println(dacCounts);
 
   currentAdcRaw = ads.readADC_SingleEnded(3);
   voltageAdcRaw = ads.readADC_SingleEnded(0);
@@ -232,6 +241,9 @@ void loop() {
     digitalWrite(loadButtonLed, LOW);
   }
   else{
+    if (dacCounts < 0){
+      dacCounts = 0;
+    }
     dac.setVoltage(dacCounts, false);
     digitalWrite(loadButtonLed, HIGH);
   }
