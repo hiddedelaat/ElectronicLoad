@@ -68,7 +68,7 @@ float setCurrent = 0;
 float setCurrentPrevious = 0;
 
 /* Calibration constants */
-const float voltage_cal = 99.58;
+const float voltage_cal = 99.74;
 
 int keypress = 0;
 int keypress_t = 0;
@@ -124,7 +124,6 @@ void setup() {
   Serial.begin(115200);
 
   dac.begin(0x60);
-  // dac.setVoltage(0, true);
 
   ledcSetup(fanChannel, fanPwmFrequency, fanPwmResolution);
   ledcAttachPin(fanPin, fanChannel);
@@ -135,8 +134,6 @@ void setup() {
 
   lcd.init();
   
-  
-  
   ledcWriteNote(buzChannel, NOTE_C, 5); delay(150);
   ledcWriteNote(buzChannel, NOTE_E, 5); delay(150);
   ledcWriteNote(buzChannel, NOTE_C, 6); delay(300);
@@ -145,7 +142,6 @@ void setup() {
   fanSet(100.0);    // Give fake temperature to test fan
   delay(2000);
 
-  
   lcd.backlight();
 
   sensors.begin();
@@ -166,38 +162,49 @@ void loop() {
   if (keypress > 0) {
     switch (keypress) {
       case 1:
-        if (setCurrent + 0.1 <= hardwareMaxCurrent) {
-          setCurrent = setCurrent + 0.1;
-        }
-        else if (setCurrent > 10.0) {
-          setCurrent = hardwareMaxCurrent;
-        }
-        lcd.clear();
-        break;
+          setCurrent = 1.0;
+      break;
       case 2:
-        if (setCurrent - 0.1 >= 0) {
-          setCurrent = setCurrent - 0.1;
-        }
-        else if (setCurrent - 0.1 < 0) {
-          setCurrent = 0.0;
-        }
-        lcd.clear();
-        break;
+          setCurrent = 2.0;
+      break;
       case 3:
-        setCurrent = 0.0;
-        lcd.clear();
-        break;
+          setCurrent = 3.0;
+      break;
+      case 4:
+      break;
       case 5:
-        setCurrent = 10.0;
-        lcd.clear();
-        break;
+        setCurrent = 4.0;
+      break;
+      case 6:
+        setCurrent = 5.0;
+      break;
+      case 7:
+        setCurrent = 6.0;
+      break;
+      case 8:
+      break;
       case 9:
-        lcd.clear();
-        break;
+        setCurrent = 7.0;
+      break;
       case 10:
-        break;
+        setCurrent = 8.0;
+      break;
       case 11:
-        break;
+        setCurrent = 9.0;
+      break;
+      case 12:
+      break;
+      case 13:
+        digitalWrite(relayPin, HIGH);
+      break;
+      case 14:
+      break;
+      case 15:
+        digitalWrite(relayPin, LOW);
+      break;
+      case 16:
+       lcd.clear();
+      break;
     }
   }
 
@@ -216,15 +223,16 @@ void loop() {
       dacCounts++;
     }
   }
-  
 
-  Serial.println(dacCounts);
-
-  currentAdcRaw = ads.readADC_SingleEnded(3);
-  voltageAdcRaw = ads.readADC_SingleEnded(0);
+  currentAdcRaw = ads.readADC_SingleEnded(3); // Current measurement
+  voltageAdcRaw = ads.readADC_SingleEnded(0); // Voltage measurement
 
   if (currentAdcRaw < 0) {
     currentAdcRaw = 0;
+  }
+
+  if (voltageAdcRaw < 0){
+    voltageAdcRaw = 0;
   }
 
   currentAdcRaw_f = float(currentAdcRaw);
@@ -281,47 +289,46 @@ void loop() {
   lcd.print("%");
 
 
-  // Serial.print("setCurrent:");
-  // Serial.print(setCurrent, 4);
-  // Serial.print("A | I_ADC_RAW:");
-  // Serial.print(currentAdcRaw);
-  // Serial.print(" | V_ADC_RAW:");
-  // Serial.print(voltageAdcRaw);
-  // Serial.print(" | measuredCurrent:");
-  // Serial.print(measuredCurrent, 4);
-  // Serial.print("A | measuredVoltage:");
-  // Serial.print(measuredVoltage, 4);
-  // Serial.print("V | measuredPower: ");
-  // Serial.print(measuredPower, 3);
-  // Serial.print("W | ");
-  // Serial.print(fanSpeed, 0);
-  // Serial.print("% | ");
-  // Serial.print("sinkTemp:");
-  // Serial.print(tempC, 2);  
-  // Serial.print("°C | loopTime: ");
-  // Serial.print(millis() - prevMillis);
-  // Serial.print("ms | ");  
-  // Serial.print(micros() - prevMicros);
-  // Serial.println("µs");
-
+  Serial.print("setCurrent:");
+  Serial.print(setCurrent, 4);
+  Serial.print("A | I_ADC_RAW:");
+  Serial.print(currentAdcRaw);
+  Serial.print(" | V_ADC_RAW:");
+  Serial.print(voltageAdcRaw);
+  Serial.print(" | measuredCurrent:");
+  Serial.print(measuredCurrent, 4);
+  Serial.print("A | measuredVoltage:");
+  Serial.print(measuredVoltage, 4);
+  Serial.print("V | measuredPower: ");
+  Serial.print(measuredPower, 3);
+  Serial.print("W | ");
+  Serial.print(fanSpeed, 0);
+  Serial.print("% | ");
+  Serial.print("sinkTemp:");
+  Serial.print(tempC, 2);  
+  Serial.print("°C | loopTime: ");
+  Serial.print(millis() - prevMillis);
+  Serial.print("ms | ");  
+  Serial.print(micros() - prevMicros);
+  Serial.println("µs");
 
   int encoder = detectMovement();
 
  if (encoder > 0) {
     switch (encoder) {
       case 1:
-        if (setCurrent + 0.1 <= hardwareMaxCurrent) {
-          setCurrent = setCurrent + 0.1;
+        if (setCurrent + 0.01 <= hardwareMaxCurrent) {
+          setCurrent = setCurrent + 0.01;
         }
-        else if (setCurrent + 0.1 > 10.0) {
+        else if (setCurrent + 0.01 > 10.0) {
           setCurrent = hardwareMaxCurrent;
         }
       break;
       case 2:
-        if (setCurrent - 0.1 >= 0) {
-          setCurrent = setCurrent - 0.1;
+        if (setCurrent - 0.01 >= 0) {
+          setCurrent = setCurrent - 0.01;
         }
-        else if (setCurrent - 0.1 < 0) {
+        else if (setCurrent - 0.01 < 0) {
           setCurrent = 0.0;
         }
       break;
