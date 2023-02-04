@@ -52,6 +52,7 @@ bool senseFlag = 0;
 /* Telemetry Variables*/
 
 // ADC Readings
+const int16_t adcResolution = 32768 - 1; //15 Bit ADC
 int16_t voltageAdcRaw = 0;
 int16_t currentAdcRaw = 0;
 float   currentAdcRaw_f = 0;
@@ -64,15 +65,20 @@ float measuredPower = 0;
 
 // DAC & current set values
 int   dacCounts = 0;
+int   dacCountsPrevious = 0;
 float setCurrent = 0;
 float setCurrentPrevious = 0;
 
-/* Calibration constants */
-const float voltage_cal = 99.74;
+/* (Calibration) constants */
+const float voltageCal = 99.74;
 
+const float hardwareMaxCurrent = 10.0;
+
+/* Keypad Variables */
 int keypress = 0;
 int keypress_t = 0;
-const float hardwareMaxCurrent = 10.0;
+
+/* Temperature value */
 float tempC = 0;
 
 float fanSet(float Temp) {
@@ -140,12 +146,18 @@ void setup() {
   ledcWrite(buzChannel,0);
   
   fanSet(100.0);    // Give fake temperature to test fan
+  ads.setDataRate(250);
+  Serial.println(ads.getDataRate());
+  Serial.println(ads.getGain());
+
   delay(2000);
 
   lcd.backlight();
 
+  /* Onewire Bus initialisation */
   sensors.begin();
 
+  /* Initialize Encoder */
   encoderInit();
 
   if (!sensors.getAddress(insideThermometer, 0)) Serial.println("Unable to find address for Device 0");
@@ -198,6 +210,7 @@ void loop() {
         digitalWrite(relayPin, HIGH);
       break;
       case 14:
+        setCurrent = 10.0;
       break;
       case 15:
         digitalWrite(relayPin, LOW);
@@ -215,15 +228,20 @@ void loop() {
   }
 
   /* Offset correction for current */
-  if (outputOn != 0 && measuredVoltage > 0.1){
-    if ((measuredCurrent - setCurrent) > 0.01){
-      dacCounts--;
+  if (outputOn != 0 && measuredVoltage > 0.1 && setCurrent != 0){
+    if ((measuredCurrent - setCurrent) > 0.005){
+      if ((dacCounts - 1) >= 0){
+        dacCounts--;
+      }  
     }
-    else if ((measuredCurrent - setCurrent) < 0.01){
-      dacCounts++;
+    else if ((measuredCurrent - setCurrent) < -0.005){
+      if ((dacCounts + 1) <= 4095){
+        dacCounts++;
+      }  
     }
   }
-
+  
+  /* Reading ADC Inputs */
   currentAdcRaw = ads.readADC_SingleEnded(3); // Current measurement
   voltageAdcRaw = ads.readADC_SingleEnded(0); // Voltage measurement
 
@@ -238,9 +256,10 @@ void loop() {
   currentAdcRaw_f = float(currentAdcRaw);
   voltageAdcRaw_f = float(voltageAdcRaw);
 
-  measuredCurrent = (hardwareMaxCurrent / (32768 - 1)) * currentAdcRaw_f;
-  measuredVoltage = (80.0 / (32768 - 1)) * voltageAdcRaw_f;
-  measuredVoltage = (measuredVoltage * voltage_cal) / 100;
+  measuredCurrent = (hardwareMaxCurrent / adcResolution) * currentAdcRaw_f;
+
+  measuredVoltage = (80.0 / adcResolution) * voltageAdcRaw_f;
+  measuredVoltage = (measuredVoltage * voltageCal) / 100;
   measuredPower = measuredCurrent * measuredVoltage;
 
   sensors.requestTemperatures();
@@ -253,62 +272,65 @@ void loop() {
   }
 
   if (outputOn == 0){
-    dac.setVoltage(0, false);
+    dacCounts = 0;
     digitalWrite(loadButtonLed, LOW);
   }
   else{
-    if (dacCounts < 0){
-      dacCounts = 0;
-    }
-    dac.setVoltage(dacCounts, false);
     digitalWrite(loadButtonLed, HIGH);
   }
 
-  lcd.setCursor(0, 0);
-  lcd.print("Iset:");
-  lcd.print(setCurrent, 2);
-  lcd.print("A");
-  lcd.setCursor(0, 1);
-  lcd.print("I:");
-  lcd.print(measuredCurrent, 2);
-  lcd.print("A");
-  lcd.setCursor(12, 0);
-  lcd.print("V:");
-  lcd.print(measuredVoltage, 2);
-  lcd.print("V");
-  lcd.setCursor(0, 2);
-  lcd.print("P:");
-  lcd.print(measuredPower, 2);
-  lcd.print("W");
-  lcd.setCursor(17, 3);
-  lcd.print(tempC, 0);
-  lcd.print("C");
-  lcd.setCursor(0, 3);
-  lcd.print("FAN:");
-  lcd.print(fanSpeed, 0);
-  lcd.print("%");
+  if (dacCounts != dacCountsPrevious){
+    if (dacCounts < 0){
+      dacCounts = 0;
+    }
+      dac.setVoltage(dacCounts, false);
+  }
 
+  // lcd.setCursor(0, 0);
+  // lcd.print("Iset:");
+  // lcd.print(setCurrent, 2);
+  // lcd.print("A");
+  // lcd.setCursor(0, 1);
+  // lcd.print("I:");
+  // lcd.print(measuredCurrent, 2);
+  // lcd.print("A");
+  // lcd.setCursor(12, 0);
+  // lcd.print("V:");
+  // lcd.print(measuredVoltage, 2);
+  // lcd.print("V");
+  // lcd.setCursor(0, 2);
+  // lcd.print("P:");
+  // lcd.print(measuredPower, 2);
+  // lcd.print("W");
+  // lcd.setCursor(17, 3);
+  // lcd.print(tempC, 0);
+  // lcd.print("C");
+  // lcd.setCursor(0, 3);
+  // lcd.print("FAN:");
+  // lcd.print(fanSpeed, 0);
+  // lcd.print("%");
 
-  Serial.print("setCurrent:");
-  Serial.print(setCurrent, 4);
-  Serial.print("A | I_ADC_RAW:");
+  Serial.print("setI:");
+  Serial.print(setCurrent, 3);
+  Serial.print("A|IADC:");
   Serial.print(currentAdcRaw);
-  Serial.print(" | V_ADC_RAW:");
+  Serial.print("|VADC:");
   Serial.print(voltageAdcRaw);
-  Serial.print(" | measuredCurrent:");
+  Serial.print("|DAC:");
+  Serial.print(dacCounts);
+  Serial.print("|Imeas:");
   Serial.print(measuredCurrent, 4);
-  Serial.print("A | measuredVoltage:");
+  Serial.print("A|Vmeas:");
   Serial.print(measuredVoltage, 4);
-  Serial.print("V | measuredPower: ");
+  Serial.print("V|Pmeas: ");
   Serial.print(measuredPower, 3);
-  Serial.print("W | ");
+  Serial.print("W|Fan:");
   Serial.print(fanSpeed, 0);
-  Serial.print("% | ");
-  Serial.print("sinkTemp:");
+  Serial.print("%|temp:");
   Serial.print(tempC, 2);  
-  Serial.print("°C | loopTime: ");
+  Serial.print("°C|loopTime: ");
   Serial.print(millis() - prevMillis);
-  Serial.print("ms | ");  
+  Serial.print("ms ");  
   Serial.print(micros() - prevMicros);
   Serial.println("µs");
 
@@ -334,8 +356,6 @@ void loop() {
       break;
     }
   }
-
-
 }
 
 
