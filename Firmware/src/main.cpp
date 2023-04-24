@@ -29,10 +29,11 @@ LiquidCrystal_I2C lcd(0x27, 16, 4);
 Adafruit_MCP4725 dac;
 Adafruit_ADS1115 ads;
 
-/* Debug */
+/* Timing */
 const int debug = 0;
 unsigned long prevMillis;
 unsigned long prevMicros;
+uint16_t lcdMillis = 0;
 
 /* Fan Config */
 const int fanPin = 13;
@@ -48,6 +49,9 @@ const int buzChannel = 8;
 /* Flags */
 bool outputOn = 0;
 bool senseFlag = 0;
+bool buttonPrevious = 0;
+bool adjustCurrentFlag = 0;
+bool dacWriteFlag = 0;
 
 /* Telemetry Variables*/
 
@@ -58,10 +62,12 @@ int16_t currentAdcRaw = 0;
 float   currentAdcRaw_f = 0;
 float   voltageAdcRaw_f = 0;
 
-// Calculated telemetry from ADC
+// Telemetry
 float measuredCurrent = 0;
 float measuredVoltage = 0;
 float measuredPower = 0;
+float calculatedPower = 0;
+
 
 // DAC & current set values
 int   dacCounts = 0;
@@ -69,10 +75,10 @@ int   dacCountsPrevious = 0;
 float setCurrent = 0;
 float setCurrentPrevious = 0;
 
-/* (Calibration) constants */
+/* Constants */
 const float voltageCal = 99.74;
-
 const float hardwareMaxCurrent = 10.0;
+const float maxPower = 75; 
 
 /* Keypad Variables */
 int keypress = 0;
@@ -150,7 +156,7 @@ void setup() {
   Serial.println(ads.getDataRate());
   Serial.println(ads.getGain());
 
-  delay(2000);
+  delay(1000);
 
   lcd.backlight();
 
@@ -221,14 +227,14 @@ void loop() {
     }
   }
 
-  /* Determine dacCounts for set current if setCurrent has changed */
+  /* Determine rough dacCounts for set current when setCurrent has changed */
   if (setCurrent != setCurrentPrevious){
   dacCounts = (setCurrent / hardwareMaxCurrent) * 4095;
   setCurrentPrevious = setCurrent;
   }
 
-  /* Offset correction for current */
-  if (outputOn != 0 && measuredVoltage > 0.1 && setCurrent != 0){
+  /* Dac trimming to reduce current offset */
+  if (outputOn != 0 && measuredVoltage > 0.1){
     if ((measuredCurrent - setCurrent) > 0.005){
       if ((dacCounts - 1) >= 0){
         dacCounts--;
@@ -245,14 +251,17 @@ void loop() {
   currentAdcRaw = ads.readADC_SingleEnded(3); // Current measurement
   voltageAdcRaw = ads.readADC_SingleEnded(0); // Voltage measurement
 
+  /* Sanity checks */
+
   if (currentAdcRaw < 0) {
     currentAdcRaw = 0;
   }
 
   if (voltageAdcRaw < 0){
     voltageAdcRaw = 0;
-  }
 
+  }
+  /* Telemetry calculations*/
   currentAdcRaw_f = float(currentAdcRaw);
   voltageAdcRaw_f = float(voltageAdcRaw);
 
@@ -262,56 +271,81 @@ void loop() {
   measuredVoltage = (measuredVoltage * voltageCal) / 100;
   measuredPower = measuredCurrent * measuredVoltage;
 
+  calculatedPower = setCurrent * measuredVoltage;
+
+  if (calculatedPower > maxPower){
+    adjustCurrentFlag = 1;
+  }
+
+  if (adjustCurrentFlag){
+    setCurrent = maxPower/measuredVoltage;
+    adjustCurrentFlag = 0;
+  }
+
+  /* Reading heatsink temperature sensor */
   sensors.requestTemperatures();
   tempC = printTemperature(insideThermometer);
-
+  
+  /* Set fan speed according to temperature */
   fanSpeed = fanSet(tempC);
 
-  if ((digitalRead(loadButtonPin)) == 0){
+  /* Detect load button state */
+  if (digitalRead(loadButtonPin) == 0 && buttonPrevious == false){
+    // button pressed
     outputOn = !outputOn;
+    dacWriteFlag = 1;
+    buttonPrevious = true;
+  }
+  else if (digitalRead(loadButtonPin) == 1 && buttonPrevious == true){
+    // Button released
+    buttonPrevious = false;
+    
   }
 
-  if (outputOn == 0){
-    dacCounts = 0;
-    digitalWrite(loadButtonLed, LOW);
-  }
-  else{
-    digitalWrite(loadButtonLed, HIGH);
-  }
+  digitalWrite(loadButtonLed, outputOn);
 
-  if (dacCounts != dacCountsPrevious){
+  if (dacCounts != dacCountsPrevious || dacWriteFlag == 1){
     if (dacCounts < 0){
       dacCounts = 0;
     }
+    if (outputOn){
       dac.setVoltage(dacCounts, false);
+    }
+    else{
+      dac.setVoltage(0, false);
+    }
+      dacWriteFlag = 0;
   }
 
-  // lcd.setCursor(0, 0);
-  // lcd.print("Iset:");
-  // lcd.print(setCurrent, 2);
-  // lcd.print("A");
-  // lcd.setCursor(0, 1);
-  // lcd.print("I:");
-  // lcd.print(measuredCurrent, 2);
-  // lcd.print("A");
-  // lcd.setCursor(12, 0);
-  // lcd.print("V:");
-  // lcd.print(measuredVoltage, 2);
-  // lcd.print("V");
-  // lcd.setCursor(0, 2);
-  // lcd.print("P:");
-  // lcd.print(measuredPower, 2);
-  // lcd.print("W");
-  // lcd.setCursor(17, 3);
-  // lcd.print(tempC, 0);
-  // lcd.print("C");
-  // lcd.setCursor(0, 3);
-  // lcd.print("FAN:");
-  // lcd.print(fanSpeed, 0);
-  // lcd.print("%");
+  if ((millis() - lcdMillis) > 100 ){
+  lcd.setCursor(0, 0);
+  lcd.print("Iset:");
+  lcd.print(setCurrent, 2);
+  lcd.print("A");
+  lcd.setCursor(0, 1);
+  lcd.print("I:");
+  lcd.print(measuredCurrent, 2);
+  lcd.print("A");
+  lcd.setCursor(12, 0);
+  lcd.print("V:");
+  lcd.print(measuredVoltage, 2);
+  lcd.print("V");
+  lcd.setCursor(0, 2);
+  lcd.print("P:");
+  lcd.print(measuredPower, 2);
+  lcd.print("W");
+  lcd.setCursor(17, 3);
+  lcd.print(tempC, 0);
+  lcd.print("C");
+  lcd.setCursor(0, 3);
+  lcd.print("FAN:");
+  lcd.print(fanSpeed, 0);
+  lcd.print("%");
+  lcdMillis = millis();
+  }
 
   Serial.print("setI:");
-  Serial.print(setCurrent, 3);
+  Serial.print(setCurrent, 2);
   Serial.print("A|IADC:");
   Serial.print(currentAdcRaw);
   Serial.print("|VADC:");
@@ -319,16 +353,16 @@ void loop() {
   Serial.print("|DAC:");
   Serial.print(dacCounts);
   Serial.print("|Imeas:");
-  Serial.print(measuredCurrent, 4);
+  Serial.print(measuredCurrent, 2);
   Serial.print("A|Vmeas:");
-  Serial.print(measuredVoltage, 4);
-  Serial.print("V|Pmeas: ");
-  Serial.print(measuredPower, 3);
+  Serial.print(measuredVoltage, 2);
+  Serial.print("V|Pmeas:");
+  Serial.print(measuredPower, 2);
   Serial.print("W|Fan:");
   Serial.print(fanSpeed, 0);
   Serial.print("%|temp:");
-  Serial.print(tempC, 2);  
-  Serial.print("°C|loopTime: ");
+  Serial.print(tempC, 1);  
+  Serial.print("°C|loopTime:");
   Serial.print(millis() - prevMillis);
   Serial.print("ms ");  
   Serial.print(micros() - prevMicros);
